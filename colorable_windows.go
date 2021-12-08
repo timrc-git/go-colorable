@@ -468,6 +468,7 @@ func (w *Writer) Write(data []byte) (n int, err error) {
 		er = bytes.NewReader(data)
 	}
 	er.WriteTo(w.out)
+	return len(data), nil
 }
 
 // Write writes data on console
