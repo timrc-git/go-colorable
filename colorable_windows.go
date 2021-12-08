@@ -467,20 +467,7 @@ func (w *Writer) Write(data []byte) (n int, err error) {
 	} else {
 		er = bytes.NewReader(data)
 	}
-	var plaintext bytes.Buffer
-loop:
-	for {
-		c1, err := er.ReadByte()
-		if err != nil {
-			plaintext.WriteTo(w.out)
-			break loop
-		}
-		_, err = plaintext.WriteTo(w.out)
-		if err != nil {
-			break loop
-		}
-	}
-	return len(data), nil
+	er.WriteTo(w.out)
 }
 
 // Write writes data on console
