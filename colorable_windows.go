@@ -15,6 +15,7 @@ import (
 	"unsafe"
 
 	"github.com/mattn/go-isatty"
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -98,6 +99,24 @@ type Writer struct {
 	mutex     sync.Mutex
 }
 
+// Use windows terminal emulation (added in 2016):
+//   https://docs.microsoft.com/en-us/windows/console/console-virtual-terminal-sequences
+// it's incomplete, but so is the legacy emulation provided here.
+// Also, the windows builtin code should be faster, and doesn't conflict with other libs, like jedib0t/go-pretty.
+func EnableEscapeCodes() bool {
+	outHandle := windows.Handle(os.Stdout.Fd())
+	var outMode uint32
+	if err := windows.GetConsoleMode(outHandle, &outMode); err == nil {
+		if outMode&windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING != 0 {
+			return true
+		}
+		if err := windows.SetConsoleMode(outHandle, outMode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // NewColorable returns new instance of Writer which handles escape sequence from File.
 func NewColorable(file *os.File) io.Writer {
 	if file == nil {
@@ -106,6 +125,7 @@ func NewColorable(file *os.File) io.Writer {
 
 	if isatty.IsTerminal(file.Fd()) {
 		var mode uint32
+		EnableEscapeCodes()
 		if r, _, _ := procGetConsoleMode.Call(file.Fd(), uintptr(unsafe.Pointer(&mode))); r != 0 && mode&cENABLE_VIRTUAL_TERMINAL_PROCESSING != 0 {
 			return file
 		}
@@ -435,6 +455,36 @@ func atoiWithDefault(s string, def int) (int, error) {
 
 // Write writes data on console
 func (w *Writer) Write(data []byte) (n int, err error) {
+	// TODO EnableColorsStdout(true)
+	//   follow convention of jedib0t/go-pretty
+	var er *bytes.Reader
+	if w.rest.Len() > 0 {
+		var rest bytes.Buffer
+		w.rest.WriteTo(&rest)
+		w.rest.Reset()
+		rest.Write(data)
+		er = bytes.NewReader(rest.Bytes())
+	} else {
+		er = bytes.NewReader(data)
+	}
+	var plaintext bytes.Buffer
+loop:
+	for {
+		c1, err := er.ReadByte()
+		if err != nil {
+			plaintext.WriteTo(w.out)
+			break loop
+		}
+		_, err = plaintext.WriteTo(w.out)
+		if err != nil {
+			break loop
+		}
+	}
+	return len(data), nil
+}
+
+// Write writes data on console
+func (w *Writer) WriteLegacyEmulated(data []byte) (n int, err error) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 	var csbi consoleScreenBufferInfo
